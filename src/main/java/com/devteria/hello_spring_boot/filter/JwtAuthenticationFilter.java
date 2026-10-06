@@ -7,10 +7,11 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.http.HttpHeaders;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -36,7 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String authorization =
                 request.getHeader(HttpHeaders.AUTHORIZATION);
 
-        // Không có Authorization header
+        // Không có Bearer Token -> cho request đi tiếp
         if (authorization == null ||
                 !authorization.startsWith("Bearer ")) {
 
@@ -44,47 +45,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Lấy JWT bỏ phần "Bearer "
-        String token = authorization.substring(7);
-
-        // Kiểm tra token
-        if (!jwtService.validateToken(token)) {
-
-            response.setStatus(
-                    HttpServletResponse.SC_UNAUTHORIZED
-            );
-
-            response.getWriter().write("Invalid Token");
-            return;
-        }
+        String token = authorization.substring(7).trim();
 
         try {
 
-            Jwt jwt = jwtService.getJwtDecoder().decode(token);
+            // Decode + validate JWT
+            Jwt jwt = jwtService
+                    .getJwtDecoder()
+                    .decode(token);
 
-            String userName = jwt.getSubject();
-
-            // Tạo thông tin xác thực
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                            userName,
-                            null,
+            // Tạo authentication đúng kiểu JwtAuthenticationToken
+            JwtAuthenticationToken authentication =
+                    new JwtAuthenticationToken(
+                            jwt,
                             List.of(
                                     new SimpleGrantedAuthority("ROLE_USER")
                             )
                     );
 
-            // Lưu authentication vào SecurityContext
             SecurityContextHolder
                     .getContext()
                     .setAuthentication(authentication);
 
-            // Cho request đi tiếp
             filterChain.doFilter(request, response);
 
-        } catch (Exception e) {
+        } catch (JwtException | IllegalArgumentException e) {
 
             SecurityContextHolder.clearContext();
+
+            // Tạm thời in lỗi để dễ debug
+            System.out.println("JWT ERROR: " + e.getMessage());
 
             response.setStatus(
                     HttpServletResponse.SC_UNAUTHORIZED
